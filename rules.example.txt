@@ -1,0 +1,21 @@
+# conn-monitor rules: one per line, "action program destination".
+#
+#   action       allow or deny
+#   program      the absolute path of an executable, or * for any program.
+#                Every path that leads to the same file is the same program
+#                (symlinks, /bin vs /usr/bin), because the kernel matches the
+#                file, not the spelling.
+#   destination  *                 any address, any port
+#                1.2.3.4           one address, any port
+#                1.2.3.4:443       one address and port
+#                [2606:4700::1111]:53   IPv6 needs brackets with a port
+#                :443              any address, one port
+#
+# The most specific rule wins: address and port, then address, then port,
+# then the program alone; the program's own rules before the ones for *.
+# Lines starting with # are comments; blank lines are ignored.
+
+deny      /usr/bin/curl    *                 # curl may not open connections...
+allow     /usr/bin/curl    127.0.0.53:53     # ...except asking the local DNS stub
+allow     /usr/bin/curl    127.0.0.1:8000    # ...and the local test server
+deny      *                :23               # nobody talks telnet

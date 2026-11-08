@@ -1,0 +1,26 @@
+# golangci-lint v2 configuration. Run: golangci-lint run ./...
+version: "2"
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - misspell
+    - nolintlint
+    - unconvert
+    - unparam
+  settings:
+    errcheck:
+      exclude-functions:
+        # Notes written to stderr: there is nowhere to report a failed write.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        # Closing kernel resources at exit: the kernel releases them with the
+        # process, and a failed close leaves nothing to do.
+        - (*github.com/cilium/ebpf/ringbuf.Reader).Close
+        - (github.com/cilium/ebpf/link.Link).Close
+        - (net.Listener).Close
+
+formatters:
+  enable:
+    - gofmt
