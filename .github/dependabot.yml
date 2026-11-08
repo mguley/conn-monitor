@@ -1,0 +1,12 @@
+# Monthly pull requests for new major versions of the actions ci.yml uses
+# and for the Go modules in go.mod.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: monthly
