@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to the same branch or pull request supersedes the run still
+# going for the previous one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The same versions tool/install-golangci-lint.sh and the README install;
+  # keep the three in step.
+  GOLANGCI_LINT_VERSION: v2.15.0
+  BPFTOOL_VERSION: v7.8.1
+  BPFTOOL_SHA256: 112026bbdf48d0d00ccfc4926e59878d47943f97c197f959f110abe29c898ddc
+
+jobs:
+  # The Go side, built against the committed bindings: no clang needed.
+  go:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build -o bin/conn-monitor .
+      - name: go test
+        run: go test -race -count=1 ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+
+  # The kernel side, compiled from scratch on the runner's kernel: proves the
+  # C still builds, that the committed Go bindings are the ones the C
+  # produces, and that the regenerated object passes the tests. Ubuntu 26.04
+  # is the release the project targets; its runner kernel (7.0) has BTF at
+  # /sys/kernel/btf/vmlinux and the rx_sk field drop.bpf.h compiles against.
+  bpf:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: install clang, llvm and the libbpf headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang llvm libbpf-dev
+      - name: install bpftool
+        run: |
+          curl --fail --location --silent --show-error --retry 3 \
+            -o bpftool.tar.gz \
+            "https://github.com/libbpf/bpftool/releases/download/${BPFTOOL_VERSION}/bpftool-${BPFTOOL_VERSION}-amd64.tar.gz"
+          echo "${BPFTOOL_SHA256}  bpftool.tar.gz" | sha256sum --check
+          tar -xzf bpftool.tar.gz bpftool
+          sudo install -m 0755 bpftool /usr/local/bin/bpftool
+          rm -f bpftool bpftool.tar.gz
+          bpftool version
+      - name: generate vmlinux.h
+        run: bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h
+      - name: go generate
+        run: go generate ./...
+      - name: committed bindings are current
+        # The .go file is a pure function of the C types, so it must come
+        # out the same here as on the machine that committed it. The .o
+        # legitimately differs by kernel and compiler and is not compared.
+        run: |
+          git diff --exit-code -- monitor_x86_bpfel.go || {
+            echo "monitor_x86_bpfel.go is out of date: run 'go generate ./...' and commit the result"
+            exit 1
+          }
+      - name: build and test with the regenerated object
+        run: |
+          go build -o bin/conn-monitor .
+          ./bin/conn-monitor -list
+          go test -race -count=1 ./...
